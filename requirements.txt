@@ -99,3 +99,5 @@ urllib3==2.3.0
 watchdog==6.0.0
 wheel==0.44.0
 yarl==1.18.3
+gunicorn==20.1.0
+
