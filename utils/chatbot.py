@@ -1,30 +1,16 @@
 import streamlit as st
 import PyPDF2
 import openai
-from dotenv import load_dotenv
 import os
 import numpy as np
 from typing import Dict
 import logging
 
-# Load environment variables
-load_dotenv()
-
-# Get and validate API key
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY.strip()
-    logging.info("OpenAI API key loaded successfully")
-else:
-    error_msg = "OpenAI API key not found. Please check your .env file"
-    logging.error(error_msg)
-    st.error(error_msg)
-
 def generate_response(query: str, context: Dict) -> str:
     """Generate response using OpenAI API"""
     try:
         if not openai.api_key:
-            error_msg = "OpenAI API key not set. Please check your .env file configuration."
+            error_msg = "OpenAI API key not set. Please provide your API key in the sidebar."
             logging.error(error_msg)
             return error_msg
 
