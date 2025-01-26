@@ -12,10 +12,6 @@ import logging
 import openai
 from utils.chatbot import display_chat_interface
 
-# Remove or comment out the existing API key loading code
-# load_dotenv()
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 # Add this near the top of the app, before any analysis functions
 def initialize_api_key():
     """Initialize OpenAI API key from session state or user input"""
