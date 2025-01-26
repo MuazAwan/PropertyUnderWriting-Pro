@@ -5,7 +5,6 @@ from utils.calculations import calculate_metrics
 from utils.llm_analysis import generate_insights
 from utils.visualization import plot_metrics
 import os
-from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from PIL import Image
