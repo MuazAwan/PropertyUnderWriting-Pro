@@ -82,7 +82,11 @@ def display_chat_interface(metrics: Dict, analysis_results: Dict, openai_key: st
             "num_units": analysis_results.get("num_units", 0),
             "occupancy_rate": analysis_results.get("occupancy_rate", 0),
             "market_rent": analysis_results.get("market_rent", 0),
-            "capex": analysis_results.get("capex", 0)
+            "capex": analysis_results.get("capex", 0),
+            "submarket_trends": metrics.get("submarket_trends", "Not provided"),
+            "employment_growth_rate": metrics.get("employment_growth_rate", 0),
+            "crime_rate": metrics.get("crime_rate", 0),
+            "school_ratings": metrics.get("school_ratings", 0)
         }
 
         # Display chat history
