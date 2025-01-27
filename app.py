@@ -11,6 +11,18 @@ from PIL import Image
 import logging
 import openai
 from utils.chatbot import display_chat_interface
+import gc
+import sys
+
+# Add this near the top
+st.set_page_config(
+    page_title="UnderwritePro",
+    page_icon="📊",
+    layout="wide"
+)
+
+# For render.com deployment
+port = int(os.environ.get("PORT", 8080))
 
 # Add this near the top of the app, before any analysis functions
 def initialize_api_key():
@@ -43,7 +55,14 @@ if not st.session_state.OPENAI_API_KEY:
     st.warning("Please enter your OpenAI API key in the sidebar to use AI analysis features.")
 
 # Initialize session state for inputs
-basic_inputs = ["offer_price", "total_income", "total_expenses", "equity", "debt_service"]
+basic_inputs = [
+    "offer_price", 
+    "total_income", 
+    "total_expenses", 
+    "equity", 
+    "debt_service",
+    "occupancy_rate"
+]
 additional_inputs = [
     "market_rent", "cash_on_cash_return", "projected_cap_rate_at_sale",
     "breakeven_occupancy", "year_built", "num_units", "unit_mix",
@@ -54,10 +73,16 @@ additional_inputs = [
     "parking_income", "laundry_income", "tenant_type"
 ]
 
-# Initialize session states
+# Initialize session states with proper default values
 for input_name in basic_inputs + additional_inputs:
     if input_name not in st.session_state:
-        st.session_state[input_name] = 0.0 if input_name not in ["unit_mix", "submarket_trends", "tenant_type"] else ""
+        # Set appropriate default values based on input type
+        if input_name == "occupancy_rate":
+            st.session_state[input_name] = 0.0  # or any default percentage
+        elif input_name in ["unit_mix", "submarket_trends", "tenant_type"]:
+            st.session_state[input_name] = ""
+        else:
+            st.session_state[input_name] = 0.0
 
 if "data" not in st.session_state:
     st.session_state["data"] = None
@@ -78,6 +103,12 @@ if "pdf_processed" not in st.session_state:
 # Streamlit app starts here
 st.title("UnderwritePro")
 st.write("Provide detailed inputs for a comprehensive analysis and actionable insights.")
+
+# Add at the top of app.py
+gc.collect()  # Force garbage collection
+
+# Update file paths to be absolute
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # File Upload
 uploaded_file = st.file_uploader("Upload a file (Excel, CSV, or PDF)", type=["xlsx", "csv", "pdf"])
@@ -146,6 +177,15 @@ st.session_state["equity"] = st.number_input(
 )
 st.session_state["debt_service"] = st.number_input(
     "Enter Debt Service ($) (Optional)", min_value=0.0, value=st.session_state["debt_service"], step=1000.0
+)
+
+# Add this with other basic metrics inputs
+st.session_state["occupancy_rate"] = st.slider(
+    "Current Occupancy Rate (%)", 
+    min_value=0.0, 
+    max_value=100.0, 
+    value=float(st.session_state["occupancy_rate"]),
+    step=1.0
 )
 
 # Inputs - Property Overview
@@ -458,7 +498,10 @@ if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
         "rent_variation": st.session_state.get("rent_variation", 0),
         "expense_variation": st.session_state.get("expense_variation", 0),
         "total_other_income": st.session_state.get("parking_income", 0) + 
-                             st.session_state.get("laundry_income", 0)
+                             st.session_state.get("laundry_income", 0),
+        "total_income": st.session_state.get("total_income", 0) + 
+                        st.session_state.get("parking_income", 0) + 
+                        st.session_state.get("laundry_income", 0)
     }
     
     # Display chat interface
@@ -472,3 +515,25 @@ else:
 
 # Add a divider
 st.markdown("---")
+
+# Add this after imports
+def initialize_environment():
+    """Initialize environment and handle errors"""
+    try:
+        # Set up logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        
+        # Add the project root to Python path
+        project_root = os.path.abspath(os.path.dirname(__file__))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+            
+    except Exception as e:
+        st.error(f"Error initializing environment: {str(e)}")
+        logging.error(f"Environment initialization error: {str(e)}")
+
+# Call initialization
+initialize_environment()
