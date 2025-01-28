@@ -427,17 +427,6 @@ if st.button("Analyze"):
                 with st.expander("View Calculated Metrics", expanded=True):
                     st.json(st.session_state["metrics"])
 
-                # Debug logging
-                st.write("Debug - Market Analysis Values:")
-                st.write(f"Crime Rate: {st.session_state['crime_rate']}")
-                st.write(f"School Ratings: {st.session_state['school_ratings']}")
-                st.write(f"Employment Growth: {st.session_state['employment_growth_rate']}")
-                st.write(f"Submarket Trends: {st.session_state['submarket_trends']}")
-                
-                # Debug metrics
-                st.write("Debug - Metrics being sent to generate_insights:")
-                st.write(st.session_state["metrics"])
-                
                 # Before generating insights
                 analysis_data = {
                     **st.session_state["metrics"],  # Include calculated metrics
