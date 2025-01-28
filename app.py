@@ -427,21 +427,38 @@ if st.button("Analyze"):
                 with st.expander("View Calculated Metrics", expanded=True):
                     st.json(st.session_state["metrics"])
 
-                # Generate insights if API key is available
-                with st.spinner("Generating insights..."):
-                    try:
-                        insights = generate_insights(
-                            st.session_state["metrics"],
-                            model="gpt-4",
-                            insight_type=insight_type
-                        )
-                        if insights and not insights.startswith("Error"):
-                            st.markdown(insights)
-                        else:
-                            st.error(f"Failed to generate insights: {insights}")
-                    except Exception as e:
-                        st.error(f"Error generating insights: {str(e)}")
-                        logging.error(f"Insight generation error: {str(e)}")
+                # Debug logging
+                st.write("Debug - Market Analysis Values:")
+                st.write(f"Crime Rate: {st.session_state['crime_rate']}")
+                st.write(f"School Ratings: {st.session_state['school_ratings']}")
+                st.write(f"Employment Growth: {st.session_state['employment_growth_rate']}")
+                st.write(f"Submarket Trends: {st.session_state['submarket_trends']}")
+                
+                # Debug metrics
+                st.write("Debug - Metrics being sent to generate_insights:")
+                st.write(st.session_state["metrics"])
+                
+                # Before generating insights
+                analysis_data = {
+                    **st.session_state["metrics"],  # Include calculated metrics
+                    "crime_rate": st.session_state["crime_rate"],
+                    "school_ratings": st.session_state["school_ratings"],
+                    "employment_growth_rate": st.session_state["employment_growth_rate"],
+                    "submarket_trends": st.session_state["submarket_trends"],
+                    "occupancy_rate": st.session_state["occupancy_rate"]
+                }
+
+                # Generate insights with complete data
+                insights = generate_insights(
+                    analysis_data,  # Pass complete data instead of just metrics
+                    model="gpt-4",
+                    insight_type=insight_type
+                )
+                
+                if insights and not insights.startswith("Error"):
+                    st.markdown(insights)
+                else:
+                    st.error(f"Failed to generate insights: {insights}")
 
                 # Display visualization
                 if st.session_state["metrics"]:
@@ -459,7 +476,22 @@ if st.button("Export to PDF"):
             chart_path = "chart.png"
             plot_metrics(st.session_state["metrics"], chart_type=st.session_state["chart_type"], save_path=chart_path)
 
-            insights_text = generate_insights(st.session_state["metrics"], model="gpt-4", insight_type=insight_type) if st.session_state.OPENAI_API_KEY else "Insights require a valid OpenAI API key."
+            # Create complete analysis data for PDF export
+            pdf_analysis_data = {
+                **st.session_state["metrics"],
+                "crime_rate": st.session_state["crime_rate"],
+                "school_ratings": st.session_state["school_ratings"],
+                "employment_growth_rate": st.session_state["employment_growth_rate"],
+                "submarket_trends": st.session_state["submarket_trends"],
+                "occupancy_rate": st.session_state["occupancy_rate"]
+            }
+
+            insights_text = generate_insights(
+                pdf_analysis_data,
+                model="gpt-4", 
+                insight_type=insight_type
+            ) if st.session_state.OPENAI_API_KEY else "Insights require a valid OpenAI API key."
+
             pdf_file = save_to_pdf_with_graph(st.session_state["metrics"], insights_text, chart_path)
 
             st.success(f"PDF generated successfully: {pdf_file}")
@@ -501,7 +533,24 @@ if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
                              st.session_state.get("laundry_income", 0),
         "total_income": st.session_state.get("total_income", 0) + 
                         st.session_state.get("parking_income", 0) + 
-                        st.session_state.get("laundry_income", 0)
+                        st.session_state.get("laundry_income", 0),
+        # Add missing market analysis fields
+        "crime_rate": st.session_state.get("crime_rate", 0),
+        "school_ratings": st.session_state.get("school_ratings", 0),
+        "employment_growth_rate": st.session_state.get("employment_growth_rate", 0),
+        "submarket_trends": st.session_state.get("submarket_trends", ""),
+        
+        # Add missing property details
+        "year_built": st.session_state.get("year_built", 0),
+        "unit_mix": st.session_state.get("unit_mix", ""),
+        "price_per_unit": st.session_state.get("price_per_unit", 0),
+        "average_in_place_rent": st.session_state.get("average_in_place_rent", 0),
+        
+        # Add missing financial metrics
+        "renovation_cost": st.session_state.get("renovation_cost", 0),
+        "breakeven_occupancy": st.session_state.get("breakeven_occupancy", 0),
+        "projected_cap_rate_at_sale": st.session_state.get("projected_cap_rate_at_sale", 0),
+        "cash_on_cash_return": st.session_state.get("cash_on_cash_return", 0)
     }
     
     # Display chat interface
