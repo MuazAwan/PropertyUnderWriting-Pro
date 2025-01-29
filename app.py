@@ -615,7 +615,7 @@ if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
         "renovation_cost": st.session_state.get("renovation_cost", 0),
         "breakeven_occupancy": st.session_state.get("breakeven_occupancy", 0),
         "projected_cap_rate_at_sale": st.session_state.get("projected_cap_rate_at_sale", 0),
-        "cash_on_cash_return": st.session_state.get("cash_on_cash_return", 0)
+        "cash_on_cash_return": st.session_state.get("cash_on_cash_return", 0),
         # Add missing calculated metrics
         "noi_per_unit": st.session_state["metrics"].get("NOI", 0) / max(st.session_state.get("num_units", 1), 1),
         "expense_ratio": (st.session_state.get("total_expenses", 0) / max(st.session_state.get("total_income", 1), 1)) * 100,
