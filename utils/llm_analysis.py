@@ -42,72 +42,59 @@ def generate_insights(
         # Combine original data with calculated metrics
         analysis_data = {**data, **calculated_metrics}
         
-        prompt = f"""Analyze these real estate metrics as an experienced underwriter:\n{json.dumps(analysis_data, indent=2)}\n\n
-        Provide a detailed underwriting analysis with the following structure:
+        prompt = f"""Analyze these real estate metrics as an experienced underwriter:
 
-        1. Executive Summary
-           - Property overview (Year built: {data.get('year_built')}, Units: {data.get('num_units')})
-           - Total price: ${data.get('offer_price', 0):,.2f}
-           - Price per unit: ${data.get('price_per_unit', 0):,.2f}
-           - NOI: ${calculated_metrics['noi']:,.2f}
-           - Investment highlights
-           - Major risk factors
-           - Overall recommendation
+Property Overview:
+- Year Built: {data.get('year_built', 'Not provided')} (Age: {2024 - data.get('year_built', 2024)} years)
+- Number of Units: {data.get('num_units', 'Not provided')}
+- Price per Unit: ${data.get('offer_price', 0) / data.get('num_units', 1):,.2f}
+- Market Rent per Unit: ${data.get('market_rent', 0):,.2f}
+- Current Occupancy: {data.get('occupancy_rate', 0)}%
 
-        2. Financial Analysis
-           - Current NOI and projected stabilized NOI
-           - Cap rate: Current vs Market ({data.get('projected_cap_rate_at_sale')}%)
-           - Cash flow analysis (Including debt service of ${data.get('debt_service', 0):,.2f})
-           - Cash-on-cash return target: {data.get('cash_on_cash_return')}%
-           - Operating expense ratio: {calculated_metrics['operating_expense_ratio']:.1f}%
-           - Breakeven occupancy analysis: {data.get('breakeven_occupancy')}%
+Key Performance Indicators:
+- NOI per Unit: ${data.get('noi', 0) / data.get('num_units', 1):,.2f}
+- Expense Ratio: {(data.get('total_expenses', 0) / data.get('total_income', 1) * 100):.1f}%
+- DSCR: {data.get('noi', 0) / data.get('debt_service', 1) if data.get('debt_service', 0) > 0 else 0:.2f}
+- Cash on Cash Return: {data.get('cash_on_cash_return', 0):.1f}%
 
-        3. Market Analysis
-           - Submarket trends: {data.get('submarket_trends', 'Not provided')}
-           - Employment growth: {data.get('employment_growth_rate')}%
-           - Crime rate index: {data.get('crime_rate')}
-           - School ratings: {data.get('school_ratings')}/10
-           - Rent comparables and growth potential
+Financial Metrics:
+- Offer Price: ${data.get('offer_price', 0):,.2f}
+- Total Income: ${data.get('total_income', 0):,.2f}
+- Total Expenses: ${data.get('total_expenses', 0):,.2f}
+- NOI: ${data.get('noi', 0):,.2f}
+- Cap Rate: {data.get('cap_rate', 0):.2f}%
+- Debt Service: ${data.get('debt_service', 0):,.2f}
+- Equity Required: ${data.get('equity', 0):,.2f}
 
-        4. Property Assessment
-           - Unit mix breakdown: {data.get('unit_mix', 'Not provided')}
-           - Current occupancy vs market
-           - Average in-place rent: ${data.get('average_in_place_rent', 0):,.2f}
-           - Tenant profile: {data.get('tenant_type', 'Not provided')}
-           - Additional income sources:
-             * Parking: ${data.get('parking_income', 0):,.2f}
-             * Laundry: ${data.get('laundry_income', 0):,.2f}
+Additional Income:
+- Parking Income: ${data.get('parking_income', 0):,.2f}
+- Laundry Income: ${data.get('laundry_income', 0):,.2f}
+- Total Other Income: ${data.get('parking_income', 0) + data.get('laundry_income', 0):,.2f}
 
-        5. Risk Assessment
-           - Sensitivity Analysis:
-             * Rent variation: {data.get('rent_variation')}%
-             * Expense variation: {data.get('expense_variation')}%
-           - Market risks
-           - Property-specific risks
-           - Financial risks
-           - Management risks
-           - Mitigation strategies
+Market Analysis:
+- Crime Rate: {data.get('crime_rate', 0)}
+- School Rating: {data.get('school_ratings', 0)}/10
+- Employment Growth: {data.get('employment_growth_rate', 0)}%
+- Submarket Trends: {data.get('submarket_trends', 'Not provided')}
 
-        6. Value-Add Opportunities
-           - Renovation budget: ${data.get('renovation_cost', 0):,.2f}
-           - CapEx requirements: ${data.get('capex', 0):,.2f}
-           - Revenue enhancement strategies
-           - Expense reduction opportunities
+Please provide a detailed analysis with proper formatting:
+1. All dollar amounts as $X,XXX.XX
+2. All percentages as XX.XX%
+3. Include all property metrics in the analysis
+4. Provide specific recommendations based on the property's characteristics
 
-        7. Investment Recommendations
-           - Pricing analysis
-           - Deal structure (Equity: ${data.get('equity', 0):,.2f})
-           - Holding period: {data.get('holding_period', 'Not specified')} years
-           - Exit strategy
-           - Action items
+Please provide recommendations in these categories:
+1. Immediate Actions
+2. Short-term Improvements (0-6 months)
+3. Long-term Strategy (6+ months)
+4. Risk Mitigation Steps
+5. Exit Strategy Considerations
 
-        Additional Analysis Requirements:
-        - Compare all metrics to industry standards
-        - Provide specific, actionable recommendations
-        - Include quantitative justification for conclusions
-        - Factor in all additional income sources
-        - Consider renovation ROI and timing
-        """
+For each recommendation:
+- Estimated cost/benefit
+- Implementation timeline
+- Expected impact on NOI
+"""
 
         if insight_type == "improvement":
             prompt += "\nFocus heavily on sections 6 and 7, with detailed improvement strategies."
@@ -215,4 +202,3 @@ def _extract_property_data(text: str, model: str) -> str:
     except Exception as e:
         logging.error(f"Error in property data extraction: {str(e)}")
         return "{}"
-
