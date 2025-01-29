@@ -97,8 +97,8 @@ if "chart_type" not in st.session_state:
     st.session_state["chart_type"] = "bar"
 
 # Add this with your other session state initializations at the top
-if "pdf_processed" not in st.session_state:
-    st.session_state.pdf_processed = False
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = set()
 
 # Streamlit app starts here
 st.title("UnderwritePro")
@@ -110,56 +110,92 @@ gc.collect()  # Force garbage collection
 # Update file paths to be absolute
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-# File Upload
-uploaded_file = st.file_uploader("Upload a file (Excel, CSV, or PDF)", type=["xlsx", "csv", "pdf"])
+# Replace the existing file uploader with this
+uploaded_files = st.file_uploader(
+    "Upload files (Excel, CSV, or PDF)", 
+    type=["xlsx", "csv", "pdf"],
+    accept_multiple_files=True
+)
 
-# Handle PDF upload and data extraction
-if uploaded_file and uploaded_file.name.endswith('.pdf') and not st.session_state.pdf_processed:
-    try:
-        # Parse PDF and extract data
-        result = parse_file(uploaded_file, None, None)
-        extracted_data = result.get("extracted_data", {})
+# Handle multiple file uploads
+if uploaded_files:
+    extracted_data_list = []
+    
+    for uploaded_file in uploaded_files:
+        try:
+            # Parse file and extract data
+            result = parse_file(uploaded_file, None, None)
+            
+            if uploaded_file.name.endswith('.pdf'):
+                extracted_data = result.get("extracted_data", {})
+                if extracted_data:
+                    extracted_data_list.append({
+                        "filename": uploaded_file.name,
+                        "data": extracted_data
+                    })
+            else:
+                # Handle Excel/CSV data
+                data = result.get("data")
+                if not data.empty:
+                    extracted_data_list.append({
+                        "filename": uploaded_file.name,
+                        "data": data.to_dict('records')[0]
+                    })
         
-        # Debug output
-        st.write("Debug - Extracted Data:", extracted_data)
-        logging.info(f"Processing extracted data: {extracted_data}")
+        except Exception as e:
+            st.error(f"Error processing {uploaded_file.name}: {str(e)}")
+            logging.error(f"File processing error: {str(e)}")
+            continue
+    
+    # Merge extracted data
+    if extracted_data_list:
+        with st.expander("View Extracted Data from All Files"):
+            for extracted_item in extracted_data_list:
+                st.subheader(f"Data from {extracted_item['filename']}")
+                st.json(extracted_item['data'])
         
-        if not extracted_data:
-            st.error("No data could be extracted from the PDF. Please check the file or enter values manually.")
-            st.session_state.pdf_processed = True
-        else:
-            # Show extracted data in expander
-            with st.expander("View Extracted Data"):
-                st.json(extracted_data)
-            
-            # Update session state with extracted values
-            fields_to_update = {
-                "total_income": "total_income",
-                "total_expenses": "total_expenses",
-                "offer_price": "offer_price",
-                "debt_service": "debt_service",
-                "equity": "equity",
-                "capex": "capex",
-                "market_rent": "market_rent",
-                "num_units": "num_units",
-                "occupancy_rate": "occupancy_rate"
-            }
-            
-            for pdf_key, state_key in fields_to_update.items():
-                if pdf_key in extracted_data:
-                    value = extracted_data[pdf_key]
-                    st.session_state[state_key] = value
-                    logging.info(f"Updated field {state_key} = {value}")
-                    # Debug output
-                    st.write(f"Debug - Setting {state_key} to {value}")
-            
-            st.success("Data extracted successfully! Please review the pre-filled values.")
-            st.session_state.pdf_processed = True
-            st.rerun()
-            
-    except Exception as e:
-        st.error(f"Error processing PDF: {str(e)}")
-        logging.error(f"PDF processing error: {str(e)}")
+        # Merge data giving priority to non-zero values
+        merged_data = {}
+        for item in extracted_data_list:
+            for key, value in item['data'].items():
+                if key not in merged_data or (value != 0 and merged_data[key] == 0):
+                    merged_data[key] = value
+        
+        # Update session state with merged values
+        fields_to_update = {
+            "total_income": "total_income",
+            "total_expenses": "total_expenses",
+            "offer_price": "offer_price",
+            "debt_service": "debt_service",
+            "equity": "equity",
+            "capex": "capex",
+            "market_rent": "market_rent",
+            "num_units": "num_units",
+            "occupancy_rate": "occupancy_rate",
+            "year_built": "year_built",
+            "unit_mix": "unit_mix",
+            "price_per_unit": "price_per_unit",
+            "average_in_place_rent": "average_in_place_rent",
+            "submarket_trends": "submarket_trends",
+            "employment_growth_rate": "employment_growth_rate",
+            "crime_rate": "crime_rate",
+            "school_ratings": "school_ratings",
+            "cash_on_cash_return": "cash_on_cash_return",
+            "projected_cap_rate_at_sale": "projected_cap_rate_at_sale",
+            "breakeven_occupancy": "breakeven_occupancy",
+            "renovation_cost": "renovation_cost",
+            "tenant_type": "tenant_type",
+            "parking_income": "parking_income",
+            "laundry_income": "laundry_income",
+            "rent_variation": "rent_variation",
+            "expense_variation": "expense_variation"
+        }
+        
+        for file_key, state_key in fields_to_update.items():
+            if file_key in merged_data:
+                st.session_state[state_key] = merged_data[file_key]
+        
+        st.success("Data extracted and merged successfully! Please review the pre-filled values.")
 
 # Inputs - Basic Metrics
 st.header("Basic Metrics")
@@ -372,6 +408,17 @@ if st.button("Analyze"):
         st.error("Please provide your OpenAI API key in the sidebar to perform analysis.")
     else:
         try:
+            # Before generating insights
+            if any(value < 0 for value in [
+                st.session_state["offer_price"],
+                st.session_state["total_income"],
+                st.session_state["total_expenses"]
+            ]):
+                st.error("Please ensure all basic metrics are non-negative values.")
+            # Validate percentages
+            if not 0 <= st.session_state["occupancy_rate"] <= 100:
+                st.warning("Occupancy rate should be between 0 and 100%")
+
             # First check if we have the required data
             if not st.session_state["total_income"] or not st.session_state["total_expenses"] or not st.session_state["offer_price"]:
                 st.error("Please provide the required basic metrics (Income, Expenses, and Offer Price)")
@@ -429,12 +476,41 @@ if st.button("Analyze"):
 
                 # Before generating insights
                 analysis_data = {
-                    **st.session_state["metrics"],  # Include calculated metrics
+                    **st.session_state["metrics"],
+                    # Basic Metrics
+                    "offer_price": st.session_state["offer_price"],
+                    "total_income": st.session_state["total_income"],
+                    "total_expenses": st.session_state["total_expenses"],
+                    "equity": st.session_state["equity"],
+                    "debt_service": st.session_state["debt_service"],
+                    
+                    # Market Analysis
+                    "submarket_trends": st.session_state["submarket_trends"],
+                    "employment_growth_rate": st.session_state["employment_growth_rate"],
                     "crime_rate": st.session_state["crime_rate"],
                     "school_ratings": st.session_state["school_ratings"],
-                    "employment_growth_rate": st.session_state["employment_growth_rate"],
-                    "submarket_trends": st.session_state["submarket_trends"],
-                    "occupancy_rate": st.session_state["occupancy_rate"]
+                    "occupancy_rate": st.session_state["occupancy_rate"],
+                    
+                    # Financial Metrics
+                    "cash_on_cash_return": st.session_state["cash_on_cash_return"],
+                    "projected_cap_rate_at_sale": st.session_state["projected_cap_rate_at_sale"],
+                    "breakeven_occupancy": st.session_state["breakeven_occupancy"],
+                    "renovation_cost": st.session_state["renovation_cost"],
+                    "capex": st.session_state["capex"],
+                    
+                    # Tenant and Revenue Analysis
+                    "tenant_type": st.session_state["tenant_type"],
+                    "parking_income": st.session_state["parking_income"],
+                    "laundry_income": st.session_state["laundry_income"],
+                    
+                    # Sensitivity Analysis
+                    "rent_variation": st.session_state["rent_variation"],
+                    "expense_variation": st.session_state["expense_variation"],
+                    
+                    # Ensure basic calculated values are included
+                    "noi": st.session_state["metrics"].get("NOI", 0),
+                    "cap_rate": st.session_state["metrics"].get("Cap Rate (%)", 0),
+                    "dscr": st.session_state["metrics"].get("DSCR", 0)
                 }
 
                 # Generate insights with complete data
@@ -531,15 +607,19 @@ if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
         
         # Add missing property details
         "year_built": st.session_state.get("year_built", 0),
-        "unit_mix": st.session_state.get("unit_mix", ""),
+        "num_units": st.session_state.get("num_units", 0),
+        "market_rent": st.session_state.get("market_rent", 0),
         "price_per_unit": st.session_state.get("price_per_unit", 0),
-        "average_in_place_rent": st.session_state.get("average_in_place_rent", 0),
         
         # Add missing financial metrics
         "renovation_cost": st.session_state.get("renovation_cost", 0),
         "breakeven_occupancy": st.session_state.get("breakeven_occupancy", 0),
         "projected_cap_rate_at_sale": st.session_state.get("projected_cap_rate_at_sale", 0),
         "cash_on_cash_return": st.session_state.get("cash_on_cash_return", 0)
+        # Add missing calculated metrics
+        "noi_per_unit": st.session_state["metrics"].get("NOI", 0) / max(st.session_state.get("num_units", 1), 1),
+        "expense_ratio": (st.session_state.get("total_expenses", 0) / max(st.session_state.get("total_income", 1), 1)) * 100,
+        "dscr": st.session_state["metrics"].get("DSCR", 0)
     }
     
     # Display chat interface
