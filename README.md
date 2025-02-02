@@ -19,8 +19,8 @@ UnderwritePro is an advanced AI-driven real estate underwriting platform that au
 ### Steps
 1. Clone the repository:
    ```sh
-   git clone https://github.com/[your-repo]/underwritepro.git
-   cd underwritepro
+   git clone https://github.com/MuazAwan/Property-Deploy.git
+   cd Property-Deploy
    ```
 2. Install dependencies:
    ```sh
