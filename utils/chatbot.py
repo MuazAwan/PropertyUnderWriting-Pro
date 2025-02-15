@@ -5,59 +5,49 @@ import os
 import numpy as np
 from typing import Dict
 import logging
+from litellm import completion
 
 def generate_response(query: str, context: Dict) -> str:
-    """Generate response using OpenAI API"""
+    """Generate response using OpenAI or Gemini API"""
     try:
-        if not openai.api_key:
-            error_msg = "OpenAI API key not set. Please provide your API key in the sidebar."
+        if not st.session_state.OPENAI_API_KEY and not st.session_state.GOOGLE_API_KEY:
+            error_msg = "Please provide either OpenAI or Google API key in the sidebar."
             logging.error(error_msg)
             return error_msg
 
         system_message = """You are an expert real estate investment analyst assistant. 
-        Analyze the property data and provide detailed, actionable insights.
-        Focus on specific numbers and calculations.
-        Provide recommendations with expected ROI where possible.
-        Format your response with clear sections and bullet points."""
-
-        # Format context as a string with proper formatting
-        context_str = f"""
-        Property Analysis Summary:
+        Analyze the provided property data and answer questions with:
+        1. Specific numbers and calculations
+        2. Market insights and trends
+        3. Investment recommendations
+        4. Risk analysis
+        5. Improvement opportunities
         
-        Financial Metrics:
-        • NOI: ${context.get('noi', 0):,.2f}
-        • Cap Rate: {context.get('cap_rate', 0):.2f}%
-        • Cash on Cash Return: {context.get('cash_on_cash_return', 0):.2f}%
-        • DSCR: {context.get('dscr', 0):.2f}
-        
-        Income & Expenses:
-        • Total Income: ${context.get('total_income', 0):,.2f}
-        • Total Expenses: ${context.get('total_expenses', 0):,.2f}
-        • Offer Price: ${context.get('offer_price', 0):,.2f}
-        • Debt Service: ${context.get('debt_service', 0):,.2f}
-        
-        Property Details:
-        • Number of Units: {context.get('num_units', 0)}
-        • Occupancy Rate: {context.get('occupancy_rate', 0)}%
-        • Market Rent: ${context.get('market_rent', 0):,.2f}
-        • CapEx Budget: ${context.get('capex', 0):,.2f}
-        """
+        Format responses with:
+        • Clear sections
+        • Bullet points
+        • Specific metrics
+        • Actionable recommendations"""
 
-        logging.info(f"Generating response for query: {query}")
-        logging.info(f"Context: {context_str}")
-
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
+        # Use OpenAI if available, otherwise use Gemini
+        if st.session_state.OPENAI_API_KEY:
+            model = "gpt-4"
+            api_key = st.session_state.OPENAI_API_KEY
+        else:
+            model = "gemini/gemini-1.5-flash"  # Keep original model name
+            api_key = st.session_state.GOOGLE_API_KEY
+            
+        response = completion(
+            model=model,
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": f"{context_str}\n\nQuestion: {query}"}
+                {"role": "user", "content": f"Property Analysis Data:\n{context}\n\nQuestion: {query}"}
             ],
-            temperature=0.7,
-            max_tokens=1000
+            api_key=api_key
         )
         
         return response.choices[0].message.content
-
+        
     except Exception as e:
         logging.error(f"Error generating response: {str(e)}")
         return f"I apologize, but I encountered an error: {str(e)}"
@@ -69,24 +59,43 @@ def display_chat_interface(metrics: Dict, analysis_results: Dict, openai_key: st
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
-        # Create context dictionary
+        # Create enhanced context dictionary with merged data
         context = {
+            # Financial Metrics
             "total_income": analysis_results.get("total_income", 0),
             "total_expenses": analysis_results.get("total_expenses", 0),
             "offer_price": analysis_results.get("offer_price", 0),
             "debt_service": analysis_results.get("debt_service", 0),
-            "noi": metrics.get("noi", 0),
-            "cap_rate": metrics.get("cap_rate", 0),
-            "cash_on_cash_return": metrics.get("cash_on_cash_return", 0),
-            "dscr": metrics.get("dscr", 0),
+            "noi": metrics.get("NOI", 0),
+            "cap_rate": metrics.get("Cap Rate (%)", 0),
+            "cash_on_cash_return": metrics.get("Cash on Cash Return (%)", 0),
+            "dscr": metrics.get("DSCR", 0),
+            
+            # Property Details
             "num_units": analysis_results.get("num_units", 0),
             "occupancy_rate": analysis_results.get("occupancy_rate", 0),
+            "year_built": analysis_results.get("year_built", 0),
+            "property_type": analysis_results.get("property_type", "Not provided"),
+            
+            # Market Analysis
             "market_rent": analysis_results.get("market_rent", 0),
+            "submarket_trends": analysis_results.get("submarket_trends", ""),
+            "employment_growth_rate": analysis_results.get("employment_growth_rate", 0),
+            "crime_rate": analysis_results.get("crime_rate", 0),
+            "school_ratings": analysis_results.get("school_ratings", 0),
+            
+            # Additional Income
+            "parking_income": analysis_results.get("parking_income", 0),
+            "laundry_income": analysis_results.get("laundry_income", 0),
+            
+            # Capital & Improvements
+            "renovation_cost": analysis_results.get("renovation_cost", 0),
             "capex": analysis_results.get("capex", 0),
-            "submarket_trends": metrics.get("submarket_trends", "Not provided"),
-            "employment_growth_rate": metrics.get("employment_growth_rate", 0),
-            "crime_rate": metrics.get("crime_rate", 0),
-            "school_ratings": metrics.get("school_ratings", 0)
+            
+            # Calculated Metrics
+            "expense_ratio": metrics.get("Expense Ratio (%)", 0),
+            "price_per_unit": metrics.get("Price per Unit", 0),
+            "breakeven_occupancy": metrics.get("Breakeven Occupancy (%)", 0)
         }
 
         # Display chat history
