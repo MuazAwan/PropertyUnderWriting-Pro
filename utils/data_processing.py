@@ -9,10 +9,7 @@ import numpy as np
 from PyPDF2 import PdfReader
 import time
 from .calculations import calculate_metrics
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
