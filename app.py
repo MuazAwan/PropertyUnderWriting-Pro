@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-from property1.utils.data_processing import parse_file, _has_minimum_data
-from property1.utils.calculations import calculate_metrics
-from property1.utils.llm_analysis import generate_insights
-from property1.utils.visualization import plot_metrics
-from property1.utils.chatbot import display_chat_interface
+from utils.data_processing import parse_file, _has_minimum_data
+from utils.calculations import calculate_metrics
+from utils.llm_analysis import generate_insights
+from utils.visualization import plot_metrics
+from utils.chatbot import display_chat_interface
 
 import os
 import matplotlib.pyplot as plt
