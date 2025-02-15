@@ -1,190 +1,127 @@
-import pandas as pd
-from typing import Optional, List, Dict, Union
-import logging
+import streamlit as st
 import PyPDF2
+import openai
 import os
-import json
+import numpy as np
+from typing import Dict
+import logging
+from litellm import completion
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-def parse_file(
-    uploaded_file,
-    required_columns: Optional[List[str]] = None,
-    optional_columns: Optional[List[str]] = None
-) -> Dict[str, Union[pd.DataFrame, List[str], dict]]:
-    """Parse and validate uploaded files (Excel, CSV, or PDF)."""
-    if uploaded_file is None:
-        raise ValueError("No file provided")
-    
-    # Validate file type
-    file_name = uploaded_file.name.lower()
-    if not any(file_name.endswith(ext) for ext in [".pdf", ".xlsx", ".csv"]):
-        raise ValueError("Unsupported file format. Please upload a .xlsx, .csv, or .pdf file.")
-
+def generate_response(query: str, context: Dict) -> str:
+    """Generate response using OpenAI or Gemini API"""
     try:
-        logging.info(f"Processing file: {file_name}")
-        extracted_data = {}
+        if not st.session_state.OPENAI_API_KEY and not st.session_state.GOOGLE_API_KEY:
+            error_msg = "Please provide either OpenAI or Google API key in the sidebar."
+            logging.error(error_msg)
+            return error_msg
+
+        system_message = """You are an expert real estate investment analyst assistant. 
+        Analyze the provided property data and answer questions with:
+        1. Specific numbers and calculations
+        2. Market insights and trends
+        3. Investment recommendations
+        4. Risk analysis
+        5. Improvement opportunities
         
-        if file_name.endswith(".pdf"):
-            # Extract data from PDF
-            extracted_result = _parse_pdf(uploaded_file)
-            extracted_data = extracted_result.get("extracted_data", {})
+        Format responses with:
+        • Clear sections
+        • Bullet points
+        • Specific metrics
+        • Actionable recommendations"""
+
+        # Use OpenAI if available, otherwise use Gemini
+        if st.session_state.OPENAI_API_KEY:
+            model = "gpt-4"
+            api_key = st.session_state.OPENAI_API_KEY
+        else:
+            model = "gemini/gemini-1.5-flash"  # Keep original model name
+            api_key = st.session_state.GOOGLE_API_KEY
             
-            # Create DataFrame with matching field names
-            data = pd.DataFrame({
-                "total_income": [extracted_data.get("total_income", 0)],
-                "total_expenses": [extracted_data.get("total_expenses", 0)],
-                "offer_price": [extracted_data.get("offer_price", 0)],
-                "debt_service": [extracted_data.get("debt_service", 0)],
-                "equity": [extracted_data.get("equity", 0)],
-                "capex": [extracted_data.get("capex", 0)],
-                "market_rent": [extracted_data.get("market_rent", 0)],
-                "num_units": [extracted_data.get("num_units", 0)],
-                "occupancy_rate": [extracted_data.get("occupancy_rate", 0)],
-                "year_built": [extracted_data.get("year_built", 0)],
-                "price_per_unit": [extracted_data.get("price_per_unit", 0)],
-                "average_in_place_rent": [extracted_data.get("average_in_place_rent", 0)]
-            })
-            
-            # Return result with complete DataFrame
-            return {
-                "data": data,
-                "extracted_data": extracted_data,
-                "missing_columns": [],
-                "detected_columns": list(data.columns)
-            }
-        elif file_name.endswith(".xlsx"):
-            data = _parse_excel(uploaded_file)
-        else:  # CSV file
-            data = pd.read_csv(uploaded_file)
+        response = completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": f"Property Analysis Data:\n{context}\n\nQuestion: {query}"}
+            ],
+            api_key=api_key
+        )
         
-        # Only validate columns for Excel and CSV files
-        if not file_name.endswith(".pdf"):
-            result = _validate_and_process_data(
-                data, 
-                required_columns or [], 
-                optional_columns or []
-            )
-            result['extracted_data'] = extracted_data
-            return result
+        return response.choices[0].message.content
         
     except Exception as e:
-        logging.error(f"Error processing file {file_name}: {str(e)}")
-        raise ValueError(f"Error processing file: {str(e)}")
+        logging.error(f"Error generating response: {str(e)}")
+        return f"I apologize, but I encountered an error: {str(e)}"
 
-def _parse_pdf(uploaded_file) -> dict:
-    """Parse PDF file and extract relevant property information."""
+def display_chat_interface(metrics: Dict, analysis_results: Dict, openai_key: str):
+    """Display and handle the chat interface"""
     try:
-        # Extract text using PyPDF2
-        pdf_reader = PyPDF2.PdfReader(uploaded_file)
-        text_content = "".join(page.extract_text() for page in pdf_reader.pages)
-        logging.info("PDF text extracted successfully")
+        # Initialize chat history
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Create enhanced context dictionary with merged data
+        context = {
+            # Financial Metrics
+            "total_income": analysis_results.get("total_income", 0),
+            "total_expenses": analysis_results.get("total_expenses", 0),
+            "offer_price": analysis_results.get("offer_price", 0),
+            "debt_service": analysis_results.get("debt_service", 0),
+            "noi": metrics.get("NOI", 0),
+            "cap_rate": metrics.get("Cap Rate (%)", 0),
+            "cash_on_cash_return": metrics.get("Cash on Cash Return (%)", 0),
+            "dscr": metrics.get("DSCR", 0),
+            
+            # Property Details
+            "num_units": analysis_results.get("num_units", 0),
+            "occupancy_rate": analysis_results.get("occupancy_rate", 0),
+            "year_built": analysis_results.get("year_built", 0),
+            "property_type": analysis_results.get("property_type", "Not provided"),
+            
+            # Market Analysis
+            "market_rent": analysis_results.get("market_rent", 0),
+            "submarket_trends": analysis_results.get("submarket_trends", ""),
+            "employment_growth_rate": analysis_results.get("employment_growth_rate", 0),
+            "crime_rate": analysis_results.get("crime_rate", 0),
+            "school_ratings": analysis_results.get("school_ratings", 0),
+            
+            # Additional Income
+            "parking_income": analysis_results.get("parking_income", 0),
+            "laundry_income": analysis_results.get("laundry_income", 0),
+            
+            # Capital & Improvements
+            "renovation_cost": analysis_results.get("renovation_cost", 0),
+            "capex": analysis_results.get("capex", 0),
+            
+            # Calculated Metrics
+            "expense_ratio": metrics.get("Expense Ratio (%)", 0),
+            "price_per_unit": metrics.get("Price per Unit", 0),
+            "breakeven_occupancy": metrics.get("Breakeven Occupancy (%)", 0)
+        }
+
+        # Display chat history
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # Handle user input
+        user_query = st.chat_input("Ask a question about the property analysis:")
         
-        # Use LLM to extract data
-        from utils.llm_analysis import generate_insights
-        extracted_json = generate_insights(text_content, model="gpt-4", insight_type="extract_values")
-        logging.info(f"Raw extracted JSON: {extracted_json}")
-        
-        try:
-            # Parse and validate JSON
-            extracted_data = json.loads(extracted_json)
-            logging.info(f"Parsed JSON data: {extracted_data}")
+        if user_query:
+            # Add user message to chat
+            st.session_state.chat_history.append({"role": "user", "content": user_query})
             
-            # Clean and validate each value
-            cleaned_data = {}
-            field_mapping = {
-                "total_income": "total_income",
-                "total_expenses": "total_expenses",
-                "offer_price": "offer_price",
-                "debt_service": "debt_service",
-                "equity": "equity",
-                "capex": "capex",
-                "market_rent": "market_rent",
-                "num_units": "num_units",
-                "occupancy_rate": "occupancy_rate",
-                "year_built": "year_built",
-                "price_per_unit": "price_per_unit",
-                "average_in_place_rent": "average_in_place_rent"
-            }
+            # Generate and add response
+            response = generate_response(user_query, context)
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
             
-            # Process each field
-            for json_key, app_key in field_mapping.items():
-                if json_key in extracted_data:
-                    value = extracted_data[json_key]
-                    try:
-                        if isinstance(value, str):
-                            value = value.replace('$', '').replace(',', '').replace('%', '')
-                        cleaned_value = float(value)
-                        if cleaned_value != 0:  # Only include non-zero values
-                            cleaned_data[app_key] = cleaned_value
-                            logging.info(f"Extracted {app_key}: {cleaned_value}")
-                    except (ValueError, TypeError) as e:
-                        logging.warning(f"Could not convert {json_key}: {value} - {str(e)}")
-            
-            if not cleaned_data:
-                logging.warning("No valid data extracted from PDF")
-                return {"extracted_data": {}}
-                
-            logging.info(f"Final cleaned data: {cleaned_data}")
-            return {"extracted_data": cleaned_data}
-            
-        except json.JSONDecodeError as e:
-            logging.error(f"JSON parsing error: {str(e)}")
-            return {"extracted_data": {}}
+            # Rerun to update the display
+            st.rerun()
+
+        # Add clear chat button
+        if st.sidebar.button("Clear Chat History"):
+            st.session_state.chat_history = []
+            st.rerun()
             
     except Exception as e:
-        logging.error(f"Error in PDF parsing: {str(e)}")
-        return {"extracted_data": {}}
-
-def _parse_excel(uploaded_file) -> pd.DataFrame:
-    """Parse Excel file, handling multiple sheets."""
-    excel_file = pd.ExcelFile(uploaded_file)
-    if len(excel_file.sheet_names) > 1:
-        sheet_name = excel_file.sheet_names[0]
-        logging.info(f"Multiple sheets found. Using first sheet: {sheet_name}")
-    return pd.read_excel(uploaded_file)
-
-def _validate_and_process_data(
-    data: pd.DataFrame,
-    required_columns: List[str],
-    optional_columns: List[str]
-) -> Dict[str, Union[pd.DataFrame, List[str]]]:
-    """Validate and process the DataFrame."""
-    # Check required columns for non-PDF files
-    missing_columns = [col for col in required_columns if col not in data.columns]
-    if missing_columns and required_columns:
-        msg = f"Required columns missing: {missing_columns}. Please ensure your Excel/CSV file contains these columns."
-        logging.error(msg)
-        raise ValueError(msg)
-
-    # Detect optional columns
-    detected_columns = [col for col in optional_columns if col in data.columns]
-    logging.info(f"Detected optional columns: {detected_columns}")
-
-    # Clean data
-    data = _clean_dataframe(data, optional_columns)
-    return {
-        "data": data,
-        "missing_columns": missing_columns,
-        "detected_columns": detected_columns,
-    }
-
-def _clean_dataframe(data: pd.DataFrame, optional_columns: List[str]) -> pd.DataFrame:
-    """Clean and prepare DataFrame for analysis."""
-    # Fill NaN values
-    data = data.fillna(0)
-
-    # Convert numeric columns
-    for col in data.columns:
-        if data[col].dtype == "object":
-            try:
-                data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
-            except Exception as e:
-                logging.debug(f"Could not convert column {col} to numeric: {str(e)}")
-
-    # Add missing optional columns
-    for col in optional_columns:
-        if col not in data.columns:
-            data[col] = 0
-
-    return data
+        st.error(f"Chat interface error: {str(e)}")
+        logging.error(f"Chat interface error: {str(e)}")
