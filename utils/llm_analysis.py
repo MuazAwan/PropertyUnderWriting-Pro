@@ -1,141 +1,160 @@
+import google.generativeai as genai
 import openai
 import logging
 from typing import Dict, Any, Union
 import json
+import streamlit as st
+from litellm import completion
 
 def generate_insights(
     data: Union[Dict[str, Any], str], 
-    model: str = "gpt-4", 
+    model: str,
     insight_type: str = "general"
 ) -> str:
-    """Generate insights or extract data using OpenAI's API."""
+    """Generate comprehensive insights using all available data"""
     try:
-        if not openai.api_key:
-            error_msg = "OpenAI API key not set. Please provide your API key in the sidebar."
-            logging.error(error_msg)
-            return error_msg
-        
-        # Handle PDF extraction separately
-        if insight_type == "extract_values":
-            if not isinstance(data, str):
-                raise ValueError("PDF extraction requires text input")
-            logging.info("Starting PDF data extraction")
-            return _extract_property_data(data, model)
+        # Gather all available data sources
+        analysis_data = {
+            # Basic Financial Metrics
+            "total_income": data.get("total_income", 0),
+            "total_expenses": data.get("total_expenses", 0),
+            "offer_price": data.get("offer_price", 0),
+            "noi": data.get("noi", 0),
+            "cap_rate": data.get("cap_rate", 0),
             
-        # Calculate additional metrics for analysis
-        calculated_metrics = {
-            "noi": data.get("total_income", 0) - data.get("total_expenses", 0),
-            "total_other_income": data.get("parking_income", 0) + data.get("laundry_income", 0),
-            "effective_gross_income": data.get("total_income", 0) + 
-                                    data.get("parking_income", 0) + 
-                                    data.get("laundry_income", 0),
-            "operating_expense_ratio": (data.get("total_expenses", 0) / data.get("total_income", 0) * 100) 
-                                     if data.get("total_income", 0) > 0 else 0,
-            "price_per_sf": data.get("offer_price", 0) / data.get("total_square_feet", 1) 
-                           if data.get("total_square_feet", 0) > 0 else 0,
-            "gross_rent_multiplier": data.get("offer_price", 0) / 
-                                    (data.get("total_income", 0) * 12) if data.get("total_income", 0) > 0 else 0,
-            "debt_coverage_ratio": data.get("noi", 0) / 
-                                  data.get("debt_service", 1) if data.get("debt_service", 0) > 0 else 0
+            # Property Details
+            "property_details": {
+                "num_units": data.get("num_units", 0),
+                "year_built": data.get("year_built", 0),
+                "occupancy_rate": data.get("occupancy_rate", 0),
+                "property_type": data.get("property_type", "Not provided"),
+                "property_class": data.get("property_class", "Not provided")
+            },
+            
+            # Loan Information (from PDF extraction)
+            "loan_details": st.session_state.get("loan_details", {}),
+            
+            # Property Condition (from PDF extraction)
+            "property_condition": st.session_state.get("property_condition", {}),
+            
+            # Market Analysis
+            "market_analysis": {
+                "market_rent": data.get("market_rent", 0),
+                "submarket_trends": data.get("submarket_trends", ""),
+                "employment_growth": data.get("employment_growth_rate", 0),
+                "crime_rate": data.get("crime_rate", 0),
+                "school_ratings": data.get("school_ratings", 0),
+                **st.session_state.get("market_info", {})  # Additional market info from PDFs
+            },
+            
+            # Legal and Compliance
+            "legal_compliance": st.session_state.get("legal_compliance", {}),
+            
+            # Important Contract Clauses
+            "important_clauses": st.session_state.get("important_clauses", {}),
+            
+            # Capital Expenditure
+            "capital_improvements": {
+                "renovation_cost": data.get("renovation_cost", 0),
+                "capex": data.get("capex", 0),
+                "recent_renovations": data.get("recent_renovations", ""),
+                "planned_improvements": data.get("planned_improvements", "")
+            },
+            
+            # Additional Income Sources
+            "additional_income": {
+                "parking_income": data.get("parking_income", 0),
+                "laundry_income": data.get("laundry_income", 0),
+                "other_income": data.get("other_income", 0)
+            }
         }
-        
-        # Combine original data with calculated metrics
-        analysis_data = {**data, **calculated_metrics}
-        
-        prompt = f"""Analyze these real estate metrics as an experienced underwriter:
+
+        prompt = f"""As an expert real estate analyst, provide a comprehensive analysis of this property investment opportunity:
 
 Property Overview:
-- Year Built: {data.get('year_built', 'Not provided')} (Age: {2024 - data.get('year_built', 2024)} years)
-- Number of Units: {data.get('num_units', 'Not provided')}
-- Price per Unit: ${data.get('offer_price', 0) / data.get('num_units', 1):,.2f}
-- Market Rent per Unit: ${data.get('market_rent', 0):,.2f}
-- Current Occupancy: {data.get('occupancy_rate', 0)}%
+{json.dumps(analysis_data["property_details"], indent=2)}
 
-Key Performance Indicators:
-- NOI per Unit: ${data.get('noi', 0) / data.get('num_units', 1):,.2f}
-- Expense Ratio: {(data.get('total_expenses', 0) / data.get('total_income', 1) * 100):.1f}%
-- DSCR: {data.get('noi', 0) / data.get('debt_service', 1) if data.get('debt_service', 0) > 0 else 0:.2f}
-- Cash on Cash Return: {data.get('cash_on_cash_return', 0):.1f}%
+Financial Analysis:
+- Total Income: ${analysis_data["total_income"]:,.2f}
+- Total Expenses: ${analysis_data["total_expenses"]:,.2f}
+- NOI: ${analysis_data["noi"]:,.2f}
+- Cap Rate: {analysis_data["cap_rate"]:.2f}%
 
-Financial Metrics:
-- Offer Price: ${data.get('offer_price', 0):,.2f}
-- Total Income: ${data.get('total_income', 0):,.2f}
-- Total Expenses: ${data.get('total_expenses', 0):,.2f}
-- NOI: ${data.get('noi', 0):,.2f}
-- Cap Rate: {data.get('cap_rate', 0):.2f}%
-- Debt Service: ${data.get('debt_service', 0):,.2f}
-- Equity Required: ${data.get('equity', 0):,.2f}
+Loan Details:
+{json.dumps(analysis_data["loan_details"], indent=2)}
 
-Additional Income:
-- Parking Income: ${data.get('parking_income', 0):,.2f}
-- Laundry Income: ${data.get('laundry_income', 0):,.2f}
-- Total Other Income: ${data.get('parking_income', 0) + data.get('laundry_income', 0):,.2f}
+Property Condition:
+{json.dumps(analysis_data["property_condition"], indent=2)}
 
 Market Analysis:
-- Crime Rate: {data.get('crime_rate', 0)}
-- School Rating: {data.get('school_ratings', 0)}/10
-- Employment Growth: {data.get('employment_growth_rate', 0)}%
-- Submarket Trends: {data.get('submarket_trends', 'Not provided')}
+{json.dumps(analysis_data["market_analysis"], indent=2)}
 
-Please provide a detailed analysis with proper formatting:
-1. All dollar amounts as $X,XXX.XX
-2. All percentages as XX.XX%
-3. Include all property metrics in the analysis
-4. Provide specific recommendations based on the property's characteristics
+Legal & Compliance:
+{json.dumps(analysis_data["legal_compliance"], indent=2)}
 
-Please provide recommendations in these categories:
-1. Immediate Actions
-2. Short-term Improvements (0-6 months)
-3. Long-term Strategy (6+ months)
-4. Risk Mitigation Steps
-5. Exit Strategy Considerations
+Important Contract Terms:
+{json.dumps(analysis_data["important_clauses"], indent=2)}
 
-For each recommendation:
-- Estimated cost/benefit
-- Implementation timeline
-- Expected impact on NOI
-"""
+Capital Improvements:
+{json.dumps(analysis_data["capital_improvements"], indent=2)}
 
-        if insight_type == "improvement":
-            prompt += "\nFocus heavily on sections 6 and 7, with detailed improvement strategies."
-        elif insight_type == "risk_analysis":
-            prompt += "\nProvide expanded analysis of section 5, with detailed risk mitigation strategies."
-        elif insight_type == "investment_potential":
-            prompt += "\nEmphasize sections 1, 2, and 7, with detailed investment return analysis."
+Additional Income Sources:
+{json.dumps(analysis_data["additional_income"], indent=2)}
 
-        system_prompt = """You are an expert real estate underwriter with 20+ years of experience in multifamily property analysis. 
-        Provide detailed, professional analysis using industry standard metrics and terminology. 
-        Support all conclusions with data-driven insights.
-        Be direct and specific in your recommendations.
-        Format the response in a clear, professional structure using markdown."""
+Please provide a detailed analysis including:
+1. Investment Potential
+2. Risk Assessment
+3. Market Position
+4. Legal Considerations
+5. Improvement Opportunities
+6. Financial Projections
+7. Specific Recommendations
 
-        logging.info(f"Generating {insight_type} underwriting analysis")
-        response = openai.ChatCompletion.create(
+Format the response in clear sections with bullet points and specific metrics."""
+
+        # Use the model passed from app.py
+        if model == "gpt-4":
+            if not st.session_state.OPENAI_API_KEY:
+                return "OpenAI API key is required for GPT-4 analysis"
+            api_key = st.session_state.OPENAI_API_KEY
+        else:
+            if not st.session_state.GOOGLE_API_KEY:
+                return "Google API key is required for Gemini analysis"
+            model = "gemini/gemini-1.5-flash"
+            api_key = st.session_state.GOOGLE_API_KEY
+            
+        logging.info(f"Making API call with model: {model}")
+        
+        response = completion(
             model=model,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": "You are an expert real estate investment analyst."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.5,  # Reduced for more consistent, analytical responses
-            max_tokens=2500,  # Increased for more comprehensive analysis
-            top_p=0.9,
-            presence_penalty=0.3,
-            frequency_penalty=0.3
+            api_key=api_key,
+            max_tokens=2048,
+            temperature=0.1
         )
         
-        analysis = response.choices[0].message.content
-        
-        # Format the response with a professional header
-        formatted_analysis = f"""
-# Property Underwriting Analysis Report
+        if response and hasattr(response, 'choices') and response.choices:
+            analysis = response.choices[0].message.content
+            
+            # Format the response
+            formatted_analysis = f"""
+# Property Investment Analysis Report
 
 {analysis}
 
 ---
-*This analysis is generated using AI assistance and should be reviewed by qualified professionals. All recommendations should be independently verified.*
+*This analysis is generated using AI assistance and should be reviewed by qualified professionals.*
 """
-        return formatted_analysis
-        
+            return formatted_analysis
+            
+        else:
+            error_msg = "Failed to generate analysis. Please try again."
+            logging.error(error_msg)
+            return error_msg
+
     except Exception as e:
         error_msg = f"Error in generate_insights: {str(e)}"
         logging.error(error_msg)
