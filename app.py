@@ -1,20 +1,25 @@
 import streamlit as st
 import pandas as pd
-from utils.data_processing import parse_file
-from utils.calculations import calculate_metrics
-from utils.llm_analysis import generate_insights
-from utils.visualization import plot_metrics
+from property1.utils.data_processing import parse_file, _has_minimum_data
+from property1.utils.calculations import calculate_metrics
+from property1.utils.llm_analysis import generate_insights
+from property1.utils.visualization import plot_metrics
+from property1.utils.chatbot import display_chat_interface
+
 import os
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from PIL import Image
 import logging
 import openai
-from utils.chatbot import display_chat_interface
 import gc
 import sys
 
-# Add this near the top
+
+# Define GEMINI_AVAILABLE before it's used
+GEMINI_AVAILABLE = True  # Set this based on whether Gemini functionality is available
+
+# Set page config
 st.set_page_config(
     page_title="UnderwritePro",
     page_icon="📊",
@@ -24,35 +29,66 @@ st.set_page_config(
 # For render.com deployment
 port = int(os.environ.get("PORT", 8080))
 
+def _safe_convert(value, convert_type, default=0):
+    """Safely convert values to specified type."""
+    try:
+        if value is None or value == '':
+            return default
+        if isinstance(value, str):
+            # Remove any non-numeric characters except decimal point
+            value = ''.join(c for c in value if c.isdigit() or c == '.')
+        return convert_type(float(value))
+    except (ValueError, TypeError):
+        return default
+
 # Add this near the top of the app, before any analysis functions
-def initialize_api_key():
-    """Initialize OpenAI API key from session state or user input"""
+def initialize_api_keys():
+    """Initialize API keys from session state or user input"""
     if 'OPENAI_API_KEY' not in st.session_state:
         st.session_state.OPENAI_API_KEY = None
+    if 'GOOGLE_API_KEY' not in st.session_state:
+        st.session_state.GOOGLE_API_KEY = None
     
-    # Add API key input in sidebar
     with st.sidebar:
-        st.write("## OpenAI API Key")
-        api_key = st.text_input(
-            "Enter your OpenAI API key:",
-            type="password",
-            help="Get your API key from https://platform.openai.com/account/api-keys",
-            value=st.session_state.OPENAI_API_KEY if st.session_state.OPENAI_API_KEY else ""
+        st.write("## API Keys")
+        # Add model selection
+        model_options = ["GPT-4 (for smaller inputs)"]
+        if GEMINI_AVAILABLE:
+            model_options.append("Gemini (for larger inputs)")
+            
+        st.session_state.selected_model = st.radio(
+            "Select AI Model:",
+            model_options,
+            help="Choose GPT-4 for precise analysis of smaller datasets, or Gemini for larger datasets"
         )
         
-        if api_key:
-            st.session_state.OPENAI_API_KEY = api_key
-            openai.api_key = api_key
-            st.success("API key set successfully!")
-        else:
-            st.warning("Please enter your OpenAI API key to use AI analysis features.")
+        if st.session_state.selected_model == "GPT-4 (for smaller inputs)":
+            openai_key = st.text_input(
+                "Enter your OpenAI API key:",
+                type="password",
+                help="Get your API key from https://platform.openai.com/account/api-keys",
+                value=st.session_state.OPENAI_API_KEY if st.session_state.OPENAI_API_KEY else ""
+            )
+            if openai_key:
+                st.session_state.OPENAI_API_KEY = openai_key
+                st.success("OpenAI API key set successfully!")
+        elif GEMINI_AVAILABLE:
+            google_key = st.text_input(
+                "Enter your Google API key:",
+                type="password",
+                help="Get your API key from Google AI Studio",
+                value=st.session_state.GOOGLE_API_KEY if st.session_state.GOOGLE_API_KEY else ""
+            )
+            if google_key:
+                st.session_state.GOOGLE_API_KEY = google_key
+                st.success("Google API key set successfully!")
 
 # Add this right after the app title
-initialize_api_key()
+initialize_api_keys()
 
-# Replace the existing API key validation code with this
-if not st.session_state.OPENAI_API_KEY:
-    st.warning("Please enter your OpenAI API key in the sidebar to use AI analysis features.")
+# Update the API key validation message
+if not st.session_state.OPENAI_API_KEY and not st.session_state.GOOGLE_API_KEY:
+    st.warning("Please enter either an OpenAI API key or a Google API key in the sidebar to use AI analysis features.")
 
 # Initialize session state for inputs
 basic_inputs = [
@@ -84,11 +120,24 @@ for input_name in basic_inputs + additional_inputs:
         else:
             st.session_state[input_name] = 0.0
 
+# Initialize session state variables if not exists
 if "data" not in st.session_state:
-    st.session_state["data"] = None
-
-if "metrics" not in st.session_state:
-    st.session_state["metrics"] = None
+    st.session_state.update({
+        "data": None,
+        "metrics": None,
+        "total_income": 0.0,
+        "total_expenses": 0.0,
+        "offer_price": 0.0,
+        "debt_service": 0.0,
+        "num_units": 0,
+        "occupancy_rate": 0.0,
+        "market_rent": 0.0,
+        "renovation_cost": 0.0,
+        "capex": 0.0,
+        "parking_income": 0.0,
+        "laundry_income": 0.0,
+        # ... other fields ...
+    })
 
 if "insight_type" not in st.session_state:
     st.session_state["insight_type"] = "general"
@@ -117,7 +166,8 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# Handle multiple file uploads
+
+# Update the PDF parsing error handling
 if uploaded_files:
     extracted_data_list = []
     
@@ -143,7 +193,10 @@ if uploaded_files:
                     })
         
         except Exception as e:
-            st.error(f"Error processing {uploaded_file.name}: {str(e)}")
+            if "PyCryptodome is required for AES algorithm" in str(e):
+                st.warning("PyCryptodome is required for AES algorithm. Please install it using: pip install pycryptodome")
+            else:
+                st.error(f"Error processing {uploaded_file.name}: {str(e)}")
             logging.error(f"File processing error: {str(e)}")
             continue
     
@@ -200,19 +253,39 @@ if uploaded_files:
 # Inputs - Basic Metrics
 st.header("Basic Metrics")
 st.session_state["offer_price"] = st.number_input(
-    "Enter Offer Price ($)", min_value=0.0, value=st.session_state["offer_price"], step=1000.0
+    "Offer Price ($):",
+    min_value=0.0,
+    max_value=1000000000.0,
+    value=float(st.session_state.get("offer_price", 0.0)),
+    step=1000.0,
+    format="%.2f"
 )
 st.session_state["total_income"] = st.number_input(
-    "Enter Total Income ($)", min_value=0.0, value=st.session_state["total_income"], step=1000.0
+    "Total Income ($):",
+    min_value=0.0,
+    max_value=1000000000.0,
+    value=float(st.session_state.get("total_income", 0.0)),
+    step=1000.0,
+    format="%.2f"
 )
 st.session_state["total_expenses"] = st.number_input(
-    "Enter Total Expenses ($)", min_value=0.0, value=st.session_state["total_expenses"], step=1000.0
+    "Total Expenses ($):",
+    min_value=0.0,
+    max_value=1000000000.0,
+    value=float(st.session_state.get("total_expenses", 0.0)),
+    step=1000.0,
+    format="%.2f"
 )
 st.session_state["equity"] = st.number_input(
     "Enter Equity ($) (Optional)", min_value=0.0, value=st.session_state["equity"], step=1000.0
 )
 st.session_state["debt_service"] = st.number_input(
-    "Enter Debt Service ($) (Optional)", min_value=0.0, value=st.session_state["debt_service"], step=1000.0
+    "Debt Service ($):",
+    min_value=0.0,
+    max_value=1000000000.0,
+    value=float(st.session_state.get("debt_service", 0.0)),
+    step=1000.0,
+    format="%.2f"
 )
 
 # Add this with other basic metrics inputs
@@ -252,10 +325,16 @@ with st.expander("Market Analysis (Optional)"):
         "Employment Growth Rate (%) (Optional)", min_value=-100, max_value=100, value=int(st.session_state["employment_growth_rate"])
     )
     st.session_state["crime_rate"] = st.slider(
-        "Crime Rate (%) (Optional)", min_value=0, max_value=100, value=int(st.session_state["crime_rate"])
+        "Crime Rate (%) (Optional)", 
+        min_value=0, 
+        max_value=100, 
+        value=_safe_convert(st.session_state.get("crime_rate", 0), int, 0)  # Safe conversion
     )
     st.session_state["school_ratings"] = st.slider(
-        "School Ratings (1-10) (Optional)", min_value=1, max_value=10, value=int(st.session_state["school_ratings"])
+        "School Ratings (1-10) (Optional)", 
+        min_value=1, 
+        max_value=10, 
+        value=_safe_convert(st.session_state.get("school_ratings", 5), int, 5)  # Safe conversion
     )
 
 # Inputs - Financial Metrics
@@ -270,23 +349,35 @@ with st.expander("Financial Metrics (Optional)"):
         "Breakeven Occupancy Rate (%) (Optional)", min_value=0, max_value=100, value=int(st.session_state["breakeven_occupancy"])
     )
     st.session_state["renovation_cost"] = st.number_input(
-        "Total Renovation Costs ($) (Optional)", min_value=0.0, value=st.session_state["renovation_cost"], step=1000.0
+        "Total Renovation Costs ($) (Optional)", 
+        min_value=0.0,  # float
+        value=float(st.session_state.get("renovation_cost", 0.0)),  # convert to float
+        step=1000.0,  # float
+        format="%.2f"  # ensure float format
     )
     st.session_state["capex"] = st.number_input(
-        "Capital Expenditures (CapEx) ($) (Optional)", min_value=0.0, value=st.session_state["capex"], step=1000.0
+        "Capital Expenditures (CapEx) ($) (Optional)", 
+        min_value=0.0,  # float
+        value=float(st.session_state.get("capex", 0.0)),  # convert to float
+        step=1000.0,  # float
+        format="%.2f"  # ensure float format
     )
 
 # Inputs - Tenant and Revenue Analysis
 with st.expander("Tenant and Revenue Analysis (Optional)"):
     st.session_state["tenant_type"] = st.selectbox(
         "Primary Tenant Type (Optional)", 
-        ["Family-Oriented", "Students", "Working Professionals", "Retirees"], index=0
+        ["Family-Oriented", "Students", "Working Professionals", "Retirees"], 
+        index=0
     )
-    st.session_state["parking_income"] = st.number_input(
-        "Parking Income ($) (Optional)", min_value=0.0, value=st.session_state["parking_income"], step=100.0
-    )
+    
     st.session_state["laundry_income"] = st.number_input(
-        "Laundry Income ($) (Optional)", min_value=0.0, value=st.session_state["laundry_income"], step=50.0
+        "Laundry Income ($) (Optional)",
+        min_value=0.0,
+        max_value=1000000.0,
+        value=float(st.session_state.get("laundry_income", 0.0)),  # Convert to float
+        step=50.0,
+        format="%.2f"
     )
 
 # Sensitivity Analysis
@@ -404,8 +495,8 @@ def save_to_pdf_with_graph(metrics, insights, chart_image_path, file_name="Under
 
 # Analyze button
 if st.button("Analyze"):
-    if not st.session_state.OPENAI_API_KEY:
-        st.error("Please provide your OpenAI API key in the sidebar to perform analysis.")
+    if not st.session_state.OPENAI_API_KEY and not st.session_state.GOOGLE_API_KEY:
+        st.error("Please enter either an OpenAI API key or a Google API key in the sidebar to perform analysis.")
     else:
         try:
             # Before generating insights
@@ -515,8 +606,8 @@ if st.button("Analyze"):
 
                 # Generate insights with complete data
                 insights = generate_insights(
-                    analysis_data,  # Pass complete data instead of just metrics
-                    model="gpt-4",
+                    analysis_data,
+                    model="gpt-4" if st.session_state.selected_model == "GPT-4 (for smaller inputs)" else "gemini/gemini-1.5-flash",
                     insight_type=insight_type
                 )
                 
@@ -553,9 +644,9 @@ if st.button("Export to PDF"):
 
             insights_text = generate_insights(
                 pdf_analysis_data,
-                model="gpt-4", 
+                model="gpt-4" if st.session_state.selected_model == "GPT-4 (for smaller inputs)" else "vertex_ai/gemini-1.5-flash",
                 insight_type=insight_type
-            ) if st.session_state.OPENAI_API_KEY else "Insights require a valid OpenAI API key."
+            ) if (st.session_state.OPENAI_API_KEY or st.session_state.GOOGLE_API_KEY) else "Insights require a valid API key."
 
             pdf_file = save_to_pdf_with_graph(st.session_state["metrics"], insights_text, chart_path)
 
@@ -571,7 +662,7 @@ if st.button("Export to PDF"):
 st.header("Chat with AI Assistant")
 st.write("Ask questions about the property analysis and get detailed insights.")
 
-if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
+if st.session_state.get("metrics") and (st.session_state.OPENAI_API_KEY or st.session_state.GOOGLE_API_KEY):
     # Get analysis results from session state
     analysis_results = {
         "total_income": st.session_state.get("total_income", 0),
@@ -626,7 +717,7 @@ if st.session_state.get("metrics") and st.session_state.OPENAI_API_KEY:
     display_chat_interface(
         metrics=st.session_state["metrics"],
         analysis_results=analysis_results,
-        openai_key=st.session_state.OPENAI_API_KEY
+        openai_key=st.session_state.OPENAI_API_KEY or st.session_state.GOOGLE_API_KEY
     )
 else:
     st.info("Please analyze a property first to use the chat feature.")
